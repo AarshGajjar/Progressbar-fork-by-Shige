@@ -6,6 +6,7 @@
     "foregroundColor": "#3399cc",
     "borderRadius": 0,
     "maxWidth": "20",
+    "font_size": "20px",
 
     "progressbarType" : "type_A",
     "includeNew" : true,

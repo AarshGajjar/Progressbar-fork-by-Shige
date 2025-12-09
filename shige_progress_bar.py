@@ -27,10 +27,11 @@
 
 from typing import Optional
 from aqt import QColor, QDockWidget, QPalette, QProgressBar, QStyleFactory, QWidget, Qt, mw, gui_hooks
-from aqt import QMenu, QAction, QCursor
+from aqt import QTimer
+from time import time
+from datetime import datetime
 
 __version__ = '2.0.1'
-
 
 class CustomProgressBar(QProgressBar):
     def __init__(self, *args, **kwargs):
@@ -64,7 +65,8 @@ class CustomProgressBar(QProgressBar):
         setProgressbarConfig()
 
 QProgressBar = CustomProgressBar
-
+session_start_time = None  # Initialize session start time
+cards_done_in_session = 0  # Initialize cards done in the current session
 ### USER CONFIG ###
 
 def getConfig(arg, default=""):
@@ -117,12 +119,14 @@ qfg = getConfig("foregroundColor", "#3399cc")
 qbr = getConfig("borderRadius", 0)
 
 maxWidth = getConfig("maxWidth", "5px")
+font_size = getConfig("fontSize", "20px") 
 
 scrollingBarWhenEditing = True
 
 orientationHV = Qt.Orientation.Horizontal
 
 invertTF = False # 右から左
+session_timer = None
 
 
 
@@ -257,6 +261,7 @@ def initPB() -> None:
     progressBar_2.setOrientation(orientationHV)
     if pbdStyle is None:
         use_gradation = getConfig("use_gradation", True)
+        font_size = getConfig("fontSize", "20px")
         if not use_gradation:
             progressBar_2.setStyleSheet(
                 '''
@@ -266,6 +271,7 @@ def initPB() -> None:
                         color:%s;
                         background-color: %s;
                         border-radius: %dpx;
+                        font-size: %s;
                         %s
                     }
                     QProgressBar::chunk
@@ -274,7 +280,7 @@ def initPB() -> None:
                         margin: 0px;
                         border-radius: %dpx;
                     }
-                    ''' % (qtxt, qbg, qbr, restrictSize, qfg, qbr))
+                    ''' % (qtxt, qbg, qbr, font_size, restrictSize, qfg, qbr))
 
         else:
             qfg_left = getConfig("chunk_color_left", "#3399cc")
@@ -289,6 +295,7 @@ def initPB() -> None:
                         color:%s;
                         background-color: %s;
                         border-radius: %dpx;
+                        font-size: %s;
                         %s
                     }
                     QProgressBar::chunk
@@ -297,7 +304,7 @@ def initPB() -> None:
                         margin: 0px;
                         border-radius: %dpx;
                     }
-                    ''' % (qtxt, qbg, qbr, restrictSize, qfg_left, qfg_center, qfg_right, qbr))
+                    ''' % (qtxt, qbg, qbr, font_size, restrictSize, qfg_left, qfg_center, qfg_right, qbr))
 
     else:
         progressBar_2.setStyle(pbdStyle)
@@ -366,8 +373,26 @@ def updatePB():
         updatePB_B()
     nmApplyStyle()
 
+def updateSessionTime():
+    """Updates only the session time"""
+    if session_start_time is not None and progressBar_2 is not None:
+        elapsed_time = (time() - session_start_time)
+        session_time = format_elapsed_time(elapsed_time)
+        
+        #Get current text and update only the session time part
+        current_text = progressBar_2.format()
+        if "| Session: " in current_text:
+            base_text = current_text.split("| Session: ")[0]
+            new_text = f"{base_text}| Session: {session_time}"
+            progressBar_2.setFormat(new_text)
 
-def updatePB_A() -> None:
+def format_elapsed_time(seconds: float) -> str:
+    """Format elapsed time as HH:MM:SS."""
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+def updatePB_A():
     if currDID:
         pbMax = totalCount[currDID]
         pbValue = doneCount[currDID]
@@ -393,10 +418,45 @@ def updatePB_A() -> None:
             output = "%d / %d" % (pbValue, pbMax)
 
     from .time_left import estimateTimeLeft
-    output += estimateTimeLeft(pbMax)
+    output += estimateTimeLeft(pbMax-pbValue)
+
+    # Add card speed calculation
+    if session_start_time is not None:  # Ensure session_start_time is initialized
+        elapsed_time = (time() - session_start_time)  # in seconds
+        if cards_done_in_session == 0:
+            card_speed = " | Calculating..."  # Display if no cards have been reviewed yet'
+            estimated_completion_time = None
+        else:
+            card_speed = f" | {elapsed_time / cards_done_in_session:.1f} sec/card"  # Seconds per card
+            time_etc = (elapsed_time / cards_done_in_session) * (pbMax - pbValue)
+            estimated_completion_time = time() + time_etc
+
+        output += card_speed
+        if estimated_completion_time:
+            etc_str = datetime.fromtimestamp(estimated_completion_time).strftime("%H:%M:%S")
+            output += f" ({etc_str} ETC)"
+        else:
+            output += " (ETC Calculating...)"
+
+        # Add review session time
+        session_time = format_elapsed_time(elapsed_time)  # Format elapsed time as HH:MM:SS
+        output += f" | Session: {session_time}"  # Append session time to the output
     progressBar_2.setFormat(output)
 
+def start_session_timer():
+    global session_timer
 
+    # Create a QTimer to update time
+    session_timer = QTimer()
+    session_timer.timeout.connect(updateSessionTime)
+    session_timer.start(500)
+
+def stop_session_timer():
+    global session_timer
+
+    if session_timer:
+        session_timer.stop()
+        session_timer = None
 
 #----------------------------
 def updatePB_B():
@@ -519,7 +579,7 @@ def updateCountsForDeck(did: int, remain: int, updateTotal: bool):
                 doneCount[did] = totalCount[did] - remainCount[did]
 
 def afterStateChangeCallBack(state: str, oldState: str) -> None:
-    global currDID
+    global currDID, session_start_time, cards_done_in_session
 
     if state == "resetRequired":
         if scrollingBarWhenEditing:
@@ -530,15 +590,30 @@ def afterStateChangeCallBack(state: str, oldState: str) -> None:
             initPB()
             updateCountsForAllDecks(True)
         currDID = None
+        stop_session_timer()
+        session_start_time = None
+    elif state == "overview":
+        if not progressBar_2 or didConfigChange():
+            initPB()
+            updateCountsForAllDecks(True)
+        currDID = mw.col.decks.current()['id']
+        stop_session_timer()
+        session_start_time = None
     elif state == "profileManager":
         return
-    else:  # "overview" or "review"
+    else:
+        if state == "review":
+            session_start_time = time()  # Initialize session start time
+            cards_done_in_session = 0  # Reset cards done in the current session
+            start_session_timer()  # Start the session timer when entering review mode
         currDID = mw.col.decks.current()['id']
 
     updateCountsForAllDecks(True)
     updatePB()
 
 def showQuestionCallBack(*args,**kwargs) -> None:
+    global cards_done_in_session  # Add cards_done_in_session to the global declaration
+    cards_done_in_session += 1  # Increment cards done in the current session
     updateCountsForAllDecks(False)
     updatePB()
 

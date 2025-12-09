@@ -78,6 +78,7 @@ class Shige_Addon_Config(QDialog):
         self.maxWidth = min(max(0, int(value)), 50) # "20"
         # self.maxWidth = int(config["maxWidth"]) # "20"
         # self.maxWidth = int(config["maxWidth"].replace('px', '')) if 'px' in config["maxWidth"] else int(config["maxWidth"])
+        self.font_size = config.get("fontSize", "20px") 
         self.progressbarType = config["progressbarType"] # "type_A"
         self.includeNew = config["includeNew"]
         self.hide_Progressbar = config.get("hide_Progressbar", False)
@@ -168,6 +169,9 @@ class Shige_Addon_Config(QDialog):
         self.maxWidth # "20"
         self.maxWidth_label,self.maxWidth_spinbox  = self.create_spinbox(
         "[ Bar Height ] 0 - 50, Default : 20", 0, 50, self.maxWidth, 70, 0, 1,"maxWidth"
+        )
+        self.font_size_label, self.font_size_spinbox = self.create_spinbox(
+        "[ Font Size ] 8 - 25, Default : 20", 8, 20, int(self.font_size.replace('px', '')), 70, 0, 1, "fontSize"
         )
 
 
@@ -287,6 +291,8 @@ class Shige_Addon_Config(QDialog):
 
         layout02.addWidget(self.maxWidth_label)
         self.add_widget_with_spacing(layout02, self.maxWidth_spinbox)
+        layout02.addWidget(self.font_size_label)
+        self.add_widget_with_spacing(layout02, self.font_size_spinbox)
 
         layout02.addWidget(self.hide_Progressbar_label)
         layout02.addWidget(self.show_progress_bar_on_bottom_label)
@@ -595,7 +601,7 @@ class Shige_Addon_Config(QDialog):
         def spinbox_handler(value):
             value = round(value, 1)
             if decimals == 0:
-                setattr(self, attribute_name, int(value))
+                setattr(self, attribute_name, f"{int(value)}px")
             else:
                 setattr(self, attribute_name, value)
 
@@ -689,6 +695,7 @@ class Shige_Addon_Config(QDialog):
         config["foregroundColor"] = self.foregroundColor
         config["borderRadius"] = self.borderRadius
         config["maxWidth"] = str(self.maxWidth)
+        config["fontSize"] = self.font_size
 
         if (config.get("progressbarType", "type_A") != self.progressbarType
             or config.get("includeNew", True) != self.includeNew):
